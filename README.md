@@ -7,6 +7,8 @@
 
 Stack-safe async state machines for Python. **Full stack overview:** [kroq86.github.io/loom-stack](https://kroq86.github.io/loom-stack/)
 
+**Official showcase:** [loom-run](https://github.com/kroq86/loom-run) — end-to-end demo of durable chat agent + supervisor on the stack.
+
 Loom lets you write long-running async processes as explicit state
 transitions:
 
@@ -44,13 +46,14 @@ Three composable packages for **long-running async agent loops**. Each does one 
 | **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** ← **this repo** | `pip install loom-tailcalls` | Write stack-safe transition loops (`@tailrec`, `@tailstream`) |
 | **[flow-xray](https://github.com/kroq86/flow-xray)** | `pip install flow-xray` | Export local HTML traces (LLM/tool calls, branches, errors) |
 | **[loom-runner](https://github.com/kroq86/loom-runner)** | `pip install loom-runner` | Checkpoint/resume in SQLite; CLI inspect (`explain`, `history`, …) |
+| **[loom-run](https://github.com/kroq86/loom-run)** | `pip install -e .` (from source) | **Official showcase** — full stack demo (chat, supervisor, MCP, traces) |
 
 ```text
 @tailrec agent loop  →  loom-runner run/resume  →  --trace trace.html
      (shape)                  (durability)              (flow-xray)
 ```
 
-**This repo** is the bottom layer: stack-safe async transitions. Pair with [loom-runner](https://github.com/kroq86/loom-runner) for durable runs and [flow-xray](https://github.com/kroq86/flow-xray) for local HTML debug — see [`demo-loom-flow/`](demo-loom-flow/).
+**This repo** is the bottom layer: stack-safe async transitions. Pair with [loom-runner](https://github.com/kroq86/loom-runner) for durable runs and [flow-xray](https://github.com/kroq86/flow-xray) for local HTML debug — or try the **[loom-run](https://github.com/kroq86/loom-run)** showcase for the full stack in one CLI. See also [`demo-loom-flow/`](demo-loom-flow/).
 
 ## What's new in 0.2
 
