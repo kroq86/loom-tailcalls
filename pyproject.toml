@@ -41,6 +41,7 @@ Repository = "https://github.com/kroq86/loom-tailcalls"
 Issues = "https://github.com/kroq86/loom-tailcalls/issues"
 "Loom stack" = "https://kroq86.github.io/loom-stack/"
 Documentation = "https://kroq86.github.io/loom-stack/"
+"Official showcase (loom-run)" = "https://github.com/kroq86/loom-run"
 
 [tool.setuptools.packages.find]
 include = ["loom*"]
