@@ -7,3 +7,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# secrets
+.env
+.env.*
+!.env.example
