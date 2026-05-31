@@ -91,6 +91,30 @@ Use the benchmark helper for local measurement:
 python3 scripts/bench_tailcalls.py --n 100000 --samples 5
 ```
 
+Example output on CPython 3.11+ with direct rebinding:
+
+```text
+n=100000
+samples=5
+binding=direct
+hand_loop best=0.002670s ... per_iter_best=0.027us
+loom_loop best=0.003049s ... per_iter_best=0.030us
+loom_to_hand_best_ratio=1.14x
+```
+
+Treat `loom_to_hand_best_ratio` as **expected overhead**, not a speed promise.
+Numbers vary by Python version, CPU, signature shape, and binding path. Loom
+targets stack safety first; a hand-written `while` loop remains the baseline for
+minimum per-iteration cost on tiny bodies.
+
+Rough expectations:
+
+```text
+direct rebinding   ~1.1–1.3x versus an equivalent hand-written while loop
+fast binding       somewhat higher; still avoids per-step Signature.bind
+signature binding  highest; used for complex signatures only
+```
+
 ## Known Pressure Points
 
 1. Exact opcodes and offsets may differ across CPython versions.

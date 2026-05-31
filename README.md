@@ -22,6 +22,12 @@ async def agent_loop(state):
 async `while` loop. You keep the recursive state-machine shape, but runtime
 uses constant stack.
 
+## Install
+
+```bash
+pip install loom-tailcalls
+```
+
 ## Why Loom
 
 Python already has `while`, but long-running async systems often want a
@@ -158,12 +164,72 @@ async def stream_agent(state):
     return
 ```
 
+## Comparison
+
+Loom is a stack-safety transform, not a full agent or workflow framework.
+
+| Approach | Async | Stack-safe | Streaming | Role |
+| --- | --- | --- | --- | --- |
+| **Loom** | yes | yes | `@tailstream` | Write tail-recursive async state machines |
+| **Hand-written `while`** | yes | yes | manual | Same runtime shape, more mutable loop state |
+| **[tacopy](https://github.com/raaidrt/tacopy)** | no | yes | no | Sync-only AST tail-call optimization |
+| **LangGraph / Temporal** | yes | n/a | yes | Orchestration, persistence, tools — different layer |
+
+Loom is primarily about stack safety and explicit transitions, not beating a
+hand-written loop on speed. On CPython 3.11+ with direct rebinding, a local
+benchmark at `n=100000` typically shows roughly **1.1–1.2x** overhead versus an
+equivalent hand-written `while` loop. See
+[docs/performance-tracing.md](docs/performance-tracing.md) for the measurement
+helper and expected overhead model.
+
+## Hooks And Guardrails
+
+Hooks, iteration budgets, and checkpoints belong **outside** `@tailrec`. Loom
+transforms the loop body; cross-cutting concerns compose around the step
+function or live in immutable state:
+
+```python
+async def run_step_with_hooks(state, hooks):
+    for hook in hooks:
+        await hook.before_step(state)
+    event = await run_step(state)
+    for hook in hooks:
+        event = await hook.after_step(state, event)
+    return event
+```
+
+Runaway-loop protection works the same way: keep a `remaining_steps` (or similar)
+field in state and terminate when the budget is exhausted. See
+[examples/agent_loop_with_budget.py](examples/agent_loop_with_budget.py) and
+[examples/agent_loop_with_hooks.py](examples/agent_loop_with_hooks.py).
+
+## Debugging Transforms
+
+If `@tailrec` or `@tailstream` rejects a function, call `explain_tailcalls(fn)`
+to inspect optimized sites, binding mode, and rejected recursive calls:
+
+```python
+from loom import explain_tailcalls, tailrec
+
+@tailrec
+async def agent_loop(state):
+    ...
+
+print(explain_tailcalls(agent_loop))
+```
+
+Rejected shapes include non-tail returns such as `return 1 + await fn(...)`,
+recursive calls inside `try`/`with` blocks, and `**kwargs` expansion in tail
+calls. Error messages include line/column and a fix hint.
+
 ## Run
 
 ```bash
 python3 -m unittest tests.test_loom_tailcalls
 python3 -m unittest discover -s tests
 python3 examples/agent_tool_loop.py
+python3 examples/agent_loop_with_budget.py
+python3 examples/agent_loop_with_hooks.py
 python3 examples/deep_agent_loop_comparison.py
 python3 examples/streaming_agent.py
 python3 scripts/bench_tailcalls.py --n 100000 --samples 5

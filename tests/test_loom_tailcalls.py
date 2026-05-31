@@ -133,7 +133,7 @@ class TestTailStream(unittest.IsolatedAsyncioTestCase):
 
 class TestRejections(unittest.TestCase):
     def test_rejects_non_tail_return_expression(self) -> None:
-        with self.assertRaises(TailCallError):
+        with self.assertRaises(TailCallError) as ctx:
 
             @tailrec
             async def bad(n: int) -> int:
@@ -141,8 +141,11 @@ class TestRejections(unittest.TestCase):
                     return 0
                 return 1 + await bad(n - 1)
 
+        self.assertIn("fix:", str(ctx.exception))
+        self.assertIn("return await fn(...)", str(ctx.exception))
+
     def test_rejects_await_without_return(self) -> None:
-        with self.assertRaises(TailCallError):
+        with self.assertRaises(TailCallError) as ctx:
 
             @tailrec
             async def bad(n: int) -> int:
@@ -150,6 +153,9 @@ class TestRejections(unittest.TestCase):
                     return 0
                 await bad(n - 1)
                 return n
+
+        self.assertIn("fix:", str(ctx.exception))
+        self.assertIn("return await fn(...)", str(ctx.exception))
 
     def test_rejects_recursive_call_in_comprehension(self) -> None:
         with self.assertRaises(TailCallError):
@@ -161,7 +167,7 @@ class TestRejections(unittest.TestCase):
                 return [bad(n - 1)]
 
     def test_rejects_recursive_call_in_assignment(self) -> None:
-        with self.assertRaises(TailCallError):
+        with self.assertRaises(TailCallError) as ctx:
 
             @tailrec
             async def bad(n: int) -> int:
@@ -170,8 +176,11 @@ class TestRejections(unittest.TestCase):
                 value = await bad(n - 1)
                 return value
 
+        self.assertIn("fix:", str(ctx.exception))
+        self.assertIn("assigning it to a variable", str(ctx.exception))
+
     def test_rejects_kwargs_expansion_in_tail_call(self) -> None:
-        with self.assertRaises(TailCallError):
+        with self.assertRaises(TailCallError) as ctx:
 
             @tailrec
             async def bad(n: int, *, step: int = 1) -> int:
@@ -179,6 +188,9 @@ class TestRejections(unittest.TestCase):
                     return 0
                 kwargs = {"step": step}
                 return await bad(n - step, **kwargs)
+
+        self.assertIn("fix:", str(ctx.exception))
+        self.assertIn("explicitly", str(ctx.exception))
 
 
 if __name__ == "__main__":

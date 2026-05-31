@@ -5,11 +5,43 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "loom-tailcalls"
 version = "0.1.0"
-description = "Async tail-call optimization primitives for Python agent loops."
+description = "Stack-safe async tail-call optimization for Python agent loops and state machines."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
-license = { text = "MIT" }
-authors = [{ name = "Loom contributors" }]
+authors = [{ name = "kroq86" }]
+keywords = [
+    "async",
+    "tail-call",
+    "tail-recursion",
+    "state-machine",
+    "agent",
+    "stack-safety",
+    "asyncio",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/kroq86/loom-tailcalls"
+Repository = "https://github.com/kroq86/loom-tailcalls"
+Issues = "https://github.com/kroq86/loom-tailcalls/issues"
 
 [tool.setuptools.packages.find]
 include = ["loom*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

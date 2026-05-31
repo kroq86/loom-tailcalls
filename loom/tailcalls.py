@@ -542,7 +542,10 @@ def _bind_rebind_statements(call: ast.Call, param_names: list[str]) -> list[ast.
         ),
     )
     if any(kw.arg is None for kw in call.keywords):
-        raise TailCallError("tail recursive calls with **kwargs expansion are not supported in MVP")
+        raise TailCallError(
+            "tail recursive calls with **kwargs expansion are not supported in MVP; "
+            "fix: pass keyword arguments explicitly in the tail call"
+        )
     bind = ast.Assign(
         targets=[ast.Name(id="__loom_bound", ctx=ast.Store())],
         value=ast.Call(
@@ -613,11 +616,55 @@ def _is_stream_tail_loop(node: ast.AsyncFor, function_name: str) -> bool:
     )
 
 
+_REJECTION_HINTS: dict[str, str] = {
+    "recursive call is not in tail position": (
+        "use `return await fn(...)` as the entire return value with no surrounding expression"
+    ),
+    "recursive call in if condition is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` in the branch body"
+    ),
+    "recursive call in match subject is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` in a match case body"
+    ),
+    "recursive call in match guard is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` in a match case body"
+    ),
+    "recursive call must be returned": "use `return await fn(...)` in tail position",
+    "recursive call in assignment is not tail position": (
+        "return the recursive call directly instead of assigning it to a variable"
+    ),
+    "recursive call in for loop is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` outside the loop"
+    ),
+    "recursive call in async for loop is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` outside the async for loop"
+    ),
+    "recursive call in while loop is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` outside the while loop"
+    ),
+    "recursive call in with block is not tail position": (
+        "move the recursive call outside the with block or use a hand-written while loop"
+    ),
+    "recursive call in async with block is not tail position": (
+        "move the recursive call outside the async with block or use a hand-written while loop"
+    ),
+    "recursive call in try block is not supported in MVP": (
+        "move the recursive call outside the try block or use a hand-written while loop"
+    ),
+    "recursive async generator call must be terminal async-for/yield/return": (
+        "use the terminal pattern: async for event in fn(...): yield event; return"
+    ),
+}
+
+
 def _non_tail_error(function_name: str, call: ast.Call, reason: str) -> TailCallError:
-    return TailCallError(
-        f"{function_name}: {reason} at line {getattr(call, 'lineno', '?')}, "
-        f"column {getattr(call, 'col_offset', '?')}"
-    )
+    line = getattr(call, "lineno", "?")
+    column = getattr(call, "col_offset", "?")
+    message = f"{function_name}: {reason} at line {line}, column {column}"
+    hint = _REJECTION_HINTS.get(reason)
+    if hint:
+        message = f"{message}; fix: {hint}"
+    return TailCallError(message)
 
 
 def _analyze_untransformed(fn: Callable[..., Any]) -> TailCallReport:
