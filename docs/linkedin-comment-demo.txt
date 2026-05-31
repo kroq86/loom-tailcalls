@@ -1,0 +1,2 @@
+plain recursion failed: RecursionError
+loom recursion survived: AgentState(remaining=0, total=100000)
