@@ -142,6 +142,19 @@ class TestBindingPlan(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(report["binding_reasons"])
         self.assertEqual(await loop(3, 0, "x", "y"), 5)
 
+    async def test_direct_path_unchanged_without_kwargs_spread(self) -> None:
+        @tailrec
+        async def loop(n: int, acc: int) -> int:
+            if n <= 0:
+                return acc
+            return await loop(n - 1, acc + 1)
+
+        report = explain_tailcalls(loop, as_json=True)
+
+        self.assertEqual(report["binding"], "direct")
+        self.assertEqual(report["binding_sites"], ["direct"])
+        self.assertEqual(await loop(5, 0), 5)
+
     async def test_tailstream_direct_binding_preserves_events(self) -> None:
         @tailstream
         async def stream(n: int):

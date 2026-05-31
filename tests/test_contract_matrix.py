@@ -119,6 +119,209 @@ class TestTailRecContractMatrix(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(report["rejected"]), 1)
 
 
+class TestKwargsSpreadContractMatrix(unittest.IsolatedAsyncioTestCase):
+    async def test_kwargs_merge_order_and_explicit_override(self) -> None:
+        module = load_module(
+            """
+            from loom import tailrec
+
+            async def baseline(n, *, step=1, acc=0):
+                if n <= 0:
+                    return acc
+                first = {"acc": acc + step}
+                second = {"step": step}
+                return await baseline(n - step, **first, **second)
+
+            @tailrec
+            async def optimized(n, *, step=1, acc=0):
+                if n <= 0:
+                    return acc
+                first = {"acc": acc + step}
+                second = {"step": step}
+                return await optimized(n - step, **first, **second)
+            """
+        )
+
+        self.assertEqual(await module.optimized(4, step=1), await module.baseline(4, step=1))
+
+    async def test_kwargs_bind_raises_type_error(self) -> None:
+        @tailrec
+        async def loop(n: int, *, step: int = 1) -> int:
+            if n <= 0:
+                return 0
+            kwargs = {"nope": step}
+            return await loop(n - step, **kwargs)
+
+        with self.assertRaises(TypeError):
+            await loop(2)
+
+    async def test_kwargs_explicit_overrides_spread(self) -> None:
+        @tailrec
+        async def baseline(n: int, *, step: int = 1, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            extra = {"step": step + 9, "acc": acc + step}
+            return await baseline(n - step, **extra, step=step)
+
+        @tailrec
+        async def optimized(n: int, *, step: int = 1, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            extra = {"step": step + 9, "acc": acc + step}
+            return await optimized(n - step, **extra, step=step)
+
+        self.assertEqual(await optimized(3, step=1), await baseline(3, step=1))
+
+
+class TestStructuredTailPositions(unittest.IsolatedAsyncioTestCase):
+    async def test_try_except_retry_is_equivalent(self) -> None:
+        class TransientError(RuntimeError):
+            pass
+
+        async def baseline(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            try:
+                if n % 3 == 0:
+                    raise TransientError("retry")
+                value = 1
+            except TransientError:
+                return await baseline(n - 1, acc)
+            return await baseline(n - 1, acc + value)
+
+        @tailrec
+        async def optimized(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            try:
+                if n % 3 == 0:
+                    raise TransientError("retry")
+                value = 1
+            except TransientError:
+                return await optimized(n - 1, acc)
+            return await optimized(n - 1, acc + value)
+
+        self.assertEqual(await optimized(8), await baseline(8))
+
+    async def test_async_with_scope_is_equivalent(self) -> None:
+        class Lock:
+            def __init__(self) -> None:
+                self.active = 0
+                self.peak = 0
+
+            async def __aenter__(self) -> None:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+
+            async def __aexit__(self, *_: object) -> None:
+                self.active -= 1
+
+        lock = Lock()
+
+        async def baseline(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            async with lock:
+                return await baseline(n - 1, acc + 1)
+
+        @tailrec
+        async def optimized(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            async with lock:
+                return await optimized(n - 1, acc + 1)
+
+        self.assertEqual(await optimized(5), await baseline(5))
+
+    async def test_for_loop_tail_call_is_equivalent(self) -> None:
+        async def baseline(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            for _ in range(1):
+                return await baseline(n - 1, acc + 1)
+            return acc
+
+        @tailrec
+        async def optimized(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            for _ in range(1):
+                return await optimized(n - 1, acc + 1)
+            return acc
+
+        self.assertEqual(await optimized(4), await baseline(4))
+
+    async def test_while_loop_tail_call_is_equivalent(self) -> None:
+        async def baseline(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            while n > 0:
+                return await baseline(n - 1, acc + 1)
+            return acc
+
+        @tailrec
+        async def optimized(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            while n > 0:
+                return await optimized(n - 1, acc + 1)
+            return acc
+
+        self.assertEqual(await optimized(4), await baseline(4))
+
+    async def test_agent_shaped_try_and_async_with_fixture(self) -> None:
+        class TransientError(RuntimeError):
+            pass
+
+        class Session:
+            def __init__(self) -> None:
+                self.steps = 0
+
+            async def step(self, n: int) -> int:
+                self.steps += 1
+                if n % 4 == 0:
+                    raise TransientError("retry")
+                return 1
+
+            def lock(self) -> "Lock":
+                return Lock()
+
+        class Lock:
+            def __init__(self) -> None:
+                self.entries = 0
+
+            async def __aenter__(self) -> None:
+                self.entries += 1
+
+            async def __aexit__(self, *_: object) -> None:
+                pass
+
+        session = Session()
+
+        async def baseline(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            try:
+                value = await session.step(n)
+            except TransientError:
+                return await baseline(n - 1, acc)
+            async with session.lock():
+                return await baseline(n - 1, acc + value)
+
+        @tailrec
+        async def optimized(n: int, acc: int = 0) -> int:
+            if n <= 0:
+                return acc
+            try:
+                value = await session.step(n)
+            except TransientError:
+                return await optimized(n - 1, acc)
+            async with session.lock():
+                return await optimized(n - 1, acc + value)
+
+        self.assertEqual(await optimized(6), await baseline(6))
+
+
 class TestTailStreamContractMatrix(unittest.IsolatedAsyncioTestCase):
     async def test_stream_equivalence_with_branches(self) -> None:
         module = load_module(
@@ -165,40 +368,31 @@ class TestRejectionContractMatrix(unittest.TestCase):
                     return 1
                 return 0
 
-    def test_rejects_recursive_call_in_try_block(self) -> None:
+    def test_rejects_recursive_call_in_try_finally(self) -> None:
         with self.assertRaises(TailCallError):
 
             @tailrec
             async def bad(n: int) -> int:
                 try:
+                    pass
+                finally:
                     return await bad(n - 1)
-                except RuntimeError:
+
+    def test_rejects_recursive_call_in_with_context(self) -> None:
+        with self.assertRaises(TailCallError):
+
+            @tailrec
+            async def bad(n: int) -> int:
+                with await bad(n - 1):
                     return 0
 
-    def test_rejects_recursive_call_in_with_block(self) -> None:
+    def test_rejects_recursive_call_in_for_iter(self) -> None:
         with self.assertRaises(TailCallError):
 
             @tailrec
             async def bad(n: int) -> int:
-                with open(__file__):
-                    return await bad(n - 1)
-
-    def test_rejects_recursive_call_in_loop_body(self) -> None:
-        with self.assertRaises(TailCallError):
-
-            @tailrec
-            async def bad(n: int) -> int:
-                for _ in range(1):
-                    return await bad(n - 1)
-                return 0
-
-    def test_rejects_recursive_call_in_async_for_body(self) -> None:
-        with self.assertRaises(TailCallError):
-
-            @tailrec
-            async def bad(n: int) -> int:
-                async for _ in source():
-                    return await bad(n - 1)
+                for _ in await bad(n - 1):
+                    return 0
                 return 0
 
     def test_rejects_stream_extra_body_statement(self) -> None:

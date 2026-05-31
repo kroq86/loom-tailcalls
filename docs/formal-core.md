@@ -54,6 +54,13 @@ The contract is checked from several sides:
    proof under this core.
 5. **Fuzz checks**: optional Ollama tests select only trusted templates and
    parameter ranges, then reuse the same semantic-equivalence oracle.
+6. **Binding-path checks**: tests assert `explain_tailcalls` reports
+   `direct` / `fast` / `signature` binding for reference fixtures so
+   implementation refinements do not silently regress.
+7. **Structured-block checks**: tests compare recursive baselines against
+   `@tailrec` for tail calls inside `try`, `with`, `async with`, and loops.
+8. **Kwargs-spread checks**: tests verify `**dict` tail calls, merge order,
+   explicit override, and preserved binding `TypeError`s.
 
 So the foundation is:
 
@@ -188,18 +195,25 @@ remaining behavior.
 The only coroutine tail-call rewrite is:
 
 ```text
-return await f(a1, ..., am, kw1=b1, ..., kwp=bp)
+return await f(a1, ..., am, **s1, ..., **sk, kw1=b1, ..., kwp=bp)
 ```
+
+where each `**si` is a keyword-dict spread and explicit keywords may follow
+spreads. Explicit keywords override earlier spread keys left-to-right.
 
 to:
 
 ```text
 v_args   := eval_LTR(a1, ..., am, sigma)
-v_kwargs := eval_LTR(b1, ..., bp, sigma)
+v_kw_i   := eval_LTR(si, sigma)           for each spread left-to-right
+v_kwargs := merge(v_kw_1, ..., v_kw_k, {kw1: b1, ..., kwp: bp})
 beta     := bind(signature_f, v_args, v_kwargs)
 sigma'   := update_params(sigma, beta)
 continue with sigma'
 ```
+
+`merge` is left-to-right dict union: later keys win. Each spread expression is
+evaluated exactly once.
 
 The required invariant is:
 
@@ -250,7 +264,10 @@ or both sides raise a binding `TypeError` before any parameter rebinding occurs.
 The direct path is allowed only when the function signature contains only
 `POSITIONAL_OR_KEYWORD` parameters and the recursive call supplies exactly one
 plain positional argument per parameter, with no keywords, `*args`, or
-`**kwargs`.
+`**kwargs` spreads.
+
+Tail calls that use `**kwargs` spreads always take the bind path (`bind` site),
+never direct assignment. The semantic operation is unchanged.
 
 The fast path is allowed only for signatures whose parameters are:
 
@@ -284,6 +301,43 @@ return
 ```
 
 to the same parameter rebinding plus `continue`.
+
+## Structured Tail Positions
+
+A tail-call rewrite is allowed when the terminal statement of a block is:
+
+```text
+return await f(...)
+```
+
+inside any of:
+
+```text
+try body / except handler body / try else
+with body / async with body
+for body / async for body / while body
+if branch body / match case body
+```
+
+The outer transformed loop restarts the enclosing function body on `continue`,
+so structured blocks execute again under `sigma'` exactly as they would under a
+new recursive stack frame.
+
+### Explicit Rejects
+
+These shapes remain outside `L_supported`:
+
+```text
+recursive call in try finally
+recursive call in except type expression
+recursive call in with / async with context expression
+recursive call in for iter / while test
+recursive call in assignment, expression statement, or non-tail expression
+*args spread in tail-call argument list
+```
+
+Rejection is preferred to accepting a program whose block ordering or binding
+semantics are not proved under this core.
 
 ## Soundness And Completeness
 

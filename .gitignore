@@ -12,3 +12,7 @@ build/
 .env
 .env.*
 !.env.example
+
+# local MCP index
+mcp-data/
+.cursor/mcp.json

@@ -131,6 +131,26 @@ class TestTailStream(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [])
 
 
+    async def test_kwargs_expansion_matches_explicit_keywords(self) -> None:
+        @tailrec
+        async def baseline(n: int, *, step: int = 1) -> int:
+            if n <= 0:
+                return 0
+            return await baseline(n - step, step=step)
+
+        @tailrec
+        async def optimized(n: int, *, step: int = 1) -> int:
+            if n <= 0:
+                return 0
+            kwargs = {"step": step}
+            return await optimized(n - step, **kwargs)
+
+        self.assertEqual(await optimized(10, step=2), await baseline(10, step=2))
+
+        report = explain_tailcalls(optimized, as_json=True)
+        self.assertEqual(report["binding_sites"], ["bind"])
+
+
 class TestRejections(unittest.TestCase):
     def test_rejects_non_tail_return_expression(self) -> None:
         with self.assertRaises(TailCallError) as ctx:
@@ -178,19 +198,6 @@ class TestRejections(unittest.TestCase):
 
         self.assertIn("fix:", str(ctx.exception))
         self.assertIn("assigning it to a variable", str(ctx.exception))
-
-    def test_rejects_kwargs_expansion_in_tail_call(self) -> None:
-        with self.assertRaises(TailCallError) as ctx:
-
-            @tailrec
-            async def bad(n: int, *, step: int = 1) -> int:
-                if n <= 0:
-                    return 0
-                kwargs = {"step": step}
-                return await bad(n - step, **kwargs)
-
-        self.assertIn("fix:", str(ctx.exception))
-        self.assertIn("explicitly", str(ctx.exception))
 
 
 if __name__ == "__main__":

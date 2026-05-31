@@ -321,6 +321,8 @@ class _TailRecTransformer(ast.NodeTransformer):
         self.direct_param_names = direct_param_names
         self.report = report
         self._inside_target = False
+        self._loop_depth = 0
+        self._loop_tail_flags: list[bool] = []
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AsyncFunctionDef:
         if self._inside_target:
@@ -341,8 +343,14 @@ class _TailRecTransformer(ast.NodeTransformer):
         if node.value is not None and _is_tail_await_call(node.value, self.function_name):
             call = node.value.value  # Await.value
             assert isinstance(call, ast.Call)
+            tail_flow = "break_flag" if self._loop_depth > 0 else "continue"
+            if tail_flow == "break_flag":
+                self._loop_tail_flags[-1] = True
             statements, binding_site = _continuation_statements(
-                call, self.param_names, self.direct_param_names
+                call,
+                self.param_names,
+                self.direct_param_names,
+                tail_flow=tail_flow,
             )
             self.report.binding_sites.append(binding_site)
             self.report.optimized.append(
@@ -396,23 +404,92 @@ class _TailRecTransformer(ast.NodeTransformer):
     def visit_AugAssign(self, node: ast.AugAssign) -> ast.AugAssign:
         return self._rejecting_generic_visit(node, "recursive call in assignment is not tail position")
 
-    def visit_For(self, node: ast.For) -> ast.For:
-        return self._rejecting_generic_visit(node, "recursive call in for loop is not tail position")
+    def visit_For(self, node: ast.For) -> ast.For | list[ast.stmt]:
+        calls = _find_recursive_calls(node.iter, self.function_name)
+        if calls:
+            raise _non_tail_error(self.function_name, calls[0], "recursive call in for loop iter is not tail position")
+        self._loop_depth += 1
+        self._loop_tail_flags.append(False)
+        node.body = _visit_stmt_list(self, node.body)
+        node.orelse = _visit_stmt_list(self, node.orelse)
+        had_tail = self._loop_tail_flags.pop()
+        self._loop_depth -= 1
+        if had_tail:
+            return _loop_tail_epilogue(node)
+        return node
 
-    def visit_AsyncFor(self, node: ast.AsyncFor) -> ast.AsyncFor:
-        return self._rejecting_generic_visit(node, "recursive call in async for loop is not tail position")
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> ast.AsyncFor | list[ast.stmt]:
+        calls = _find_recursive_calls(node.iter, self.function_name)
+        if calls:
+            raise _non_tail_error(
+                self.function_name, calls[0], "recursive call in async for loop iter is not tail position"
+            )
+        self._loop_depth += 1
+        self._loop_tail_flags.append(False)
+        node.body = _visit_stmt_list(self, node.body)
+        node.orelse = _visit_stmt_list(self, node.orelse)
+        had_tail = self._loop_tail_flags.pop()
+        self._loop_depth -= 1
+        if had_tail:
+            return _loop_tail_epilogue(node)
+        return node
 
-    def visit_While(self, node: ast.While) -> ast.While:
-        return self._rejecting_generic_visit(node, "recursive call in while loop is not tail position")
+    def visit_While(self, node: ast.While) -> ast.While | list[ast.stmt]:
+        calls = _find_recursive_calls(node.test, self.function_name)
+        if calls:
+            raise _non_tail_error(self.function_name, calls[0], "recursive call in while loop test is not tail position")
+        self._loop_depth += 1
+        self._loop_tail_flags.append(False)
+        node.body = _visit_stmt_list(self, node.body)
+        node.orelse = _visit_stmt_list(self, node.orelse)
+        had_tail = self._loop_tail_flags.pop()
+        self._loop_depth -= 1
+        if had_tail:
+            return _loop_tail_epilogue(node)
+        return node
 
     def visit_With(self, node: ast.With) -> ast.With:
-        return self._rejecting_generic_visit(node, "recursive call in with block is not tail position")
+        for item in node.items:
+            if (calls := _find_recursive_calls(item.context_expr, self.function_name)):
+                raise _non_tail_error(
+                    self.function_name, calls[0], "recursive call in with context expression is not tail position"
+                )
+            if item.optional_vars is not None and (calls := _find_recursive_calls(item.optional_vars, self.function_name)):
+                raise _non_tail_error(
+                    self.function_name, calls[0], "recursive call in with context expression is not tail position"
+                )
+        node.body = _visit_stmt_list(self, node.body)
+        return node
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> ast.AsyncWith:
-        return self._rejecting_generic_visit(node, "recursive call in async with block is not tail position")
+        for item in node.items:
+            if (calls := _find_recursive_calls(item.context_expr, self.function_name)):
+                raise _non_tail_error(
+                    self.function_name, calls[0], "recursive call in async with context expression is not tail position"
+                )
+            if item.optional_vars is not None and (calls := _find_recursive_calls(item.optional_vars, self.function_name)):
+                raise _non_tail_error(
+                    self.function_name, calls[0], "recursive call in async with context expression is not tail position"
+                )
+        node.body = _visit_stmt_list(self, node.body)
+        return node
 
     def visit_Try(self, node: ast.Try) -> ast.Try:
-        return self._rejecting_generic_visit(node, "recursive call in try block is not supported in MVP")
+        if (calls := _find_recursive_calls_in_stmts(node.finalbody, self.function_name)):
+            raise _non_tail_error(
+                self.function_name, calls[0], "recursive call in try finally is not supported"
+            )
+        for handler in node.handlers:
+            if handler.type is not None and (calls := _find_recursive_calls(handler.type, self.function_name)):
+                raise _non_tail_error(
+                    self.function_name, calls[0], "recursive call in except type expression is not tail position"
+                )
+            handler.body = _visit_stmt_list(self, handler.body)
+        node.body = _visit_stmt_list(self, node.body)
+        node.orelse = _visit_stmt_list(self, node.orelse)
+        node.finalbody = [self.visit(stmt) for stmt in node.finalbody]  # type: ignore[list-item]
+        node.finalbody = _flatten_statements(node.finalbody)
+        return node
 
     def _rejecting_generic_visit(self, node: ast.AST, reason: str) -> Any:
         calls = _find_recursive_calls(node, self.function_name)
@@ -455,6 +532,60 @@ class _TailStreamTransformer(ast.NodeTransformer):
                 i += 1
                 continue
 
+            if isinstance(stmt, ast.Try):
+                if (calls := _find_recursive_calls_in_stmts(stmt.finalbody, self.function_name)):
+                    raise _non_tail_error(
+                        self.function_name, calls[0], "recursive call in try finally is not supported"
+                    )
+                for handler in stmt.handlers:
+                    if handler.type is not None and (calls := _find_recursive_calls(handler.type, self.function_name)):
+                        raise _non_tail_error(
+                            self.function_name,
+                            calls[0],
+                            "recursive call in except type expression is not tail position",
+                        )
+                    handler.body = self._rewrite_block(handler.body)
+                stmt.body = self._rewrite_block(stmt.body)
+                stmt.orelse = self._rewrite_block(stmt.orelse)
+                stmt.finalbody = self._rewrite_block(stmt.finalbody)
+                rewritten.append(stmt)
+                i += 1
+                continue
+
+            if isinstance(stmt, (ast.With, ast.AsyncWith)):
+                for item in stmt.items:
+                    if (calls := _find_recursive_calls(item.context_expr, self.function_name)):
+                        reason = (
+                            "recursive call in with context expression is not tail position"
+                            if isinstance(stmt, ast.With)
+                            else "recursive call in async with context expression is not tail position"
+                        )
+                        raise _non_tail_error(self.function_name, calls[0], reason)
+                    if item.optional_vars is not None and (
+                        calls := _find_recursive_calls(item.optional_vars, self.function_name)
+                    ):
+                        reason = (
+                            "recursive call in with context expression is not tail position"
+                            if isinstance(stmt, ast.With)
+                            else "recursive call in async with context expression is not tail position"
+                        )
+                        raise _non_tail_error(self.function_name, calls[0], reason)
+                stmt.body = self._rewrite_block(stmt.body)
+                rewritten.append(stmt)
+                i += 1
+                continue
+
+            if isinstance(stmt, ast.For):
+                if (calls := _find_recursive_calls(stmt.iter, self.function_name)):
+                    raise _non_tail_error(
+                        self.function_name, calls[0], "recursive call in for loop iter is not tail position"
+                    )
+                stmt.body = self._rewrite_block(stmt.body)
+                stmt.orelse = self._rewrite_block(stmt.orelse)
+                rewritten.append(stmt)
+                i += 1
+                continue
+
             if (
                 isinstance(stmt, ast.AsyncFor)
                 and i + 1 < len(body)
@@ -478,6 +609,30 @@ class _TailStreamTransformer(ast.NodeTransformer):
                 i += 2
                 continue
 
+            if isinstance(stmt, ast.AsyncFor):
+                if (calls := _find_recursive_calls(stmt.iter, self.function_name)):
+                    raise _non_tail_error(
+                        self.function_name,
+                        calls[0],
+                        "recursive call in async for loop iter is not tail position",
+                    )
+                stmt.body = self._rewrite_block(stmt.body)
+                stmt.orelse = self._rewrite_block(stmt.orelse)
+                rewritten.append(stmt)
+                i += 1
+                continue
+
+            if isinstance(stmt, ast.While):
+                if (calls := _find_recursive_calls(stmt.test, self.function_name)):
+                    raise _non_tail_error(
+                        self.function_name, calls[0], "recursive call in while loop test is not tail position"
+                    )
+                stmt.body = self._rewrite_block(stmt.body)
+                stmt.orelse = self._rewrite_block(stmt.orelse)
+                rewritten.append(stmt)
+                i += 1
+                continue
+
             calls = _find_recursive_calls(stmt, self.function_name)
             if calls:
                 raise _non_tail_error(
@@ -491,12 +646,16 @@ class _TailStreamTransformer(ast.NodeTransformer):
 
 
 def _continuation_statements(
-    call: ast.Call, param_names: list[str], direct_param_names: list[str] | None
+    call: ast.Call,
+    param_names: list[str],
+    direct_param_names: list[str] | None,
+    *,
+    tail_flow: str = "continue",
 ) -> tuple[list[ast.stmt], str]:
     if _is_direct_rebind_call(call, direct_param_names):
         assert direct_param_names is not None
-        return _direct_rebind_statements(call, direct_param_names), "direct"
-    return _bind_rebind_statements(call, param_names), "bind"
+        return _direct_rebind_statements(call, direct_param_names, tail_flow=tail_flow), "direct"
+    return _bind_rebind_statements(call, param_names, tail_flow=tail_flow), "bind"
 
 
 def _is_direct_rebind_call(call: ast.Call, direct_param_names: list[str] | None) -> bool:
@@ -508,7 +667,7 @@ def _is_direct_rebind_call(call: ast.Call, direct_param_names: list[str] | None)
     )
 
 
-def _direct_rebind_statements(call: ast.Call, param_names: list[str]) -> list[ast.stmt]:
+def _direct_rebind_statements(call: ast.Call, param_names: list[str], *, tail_flow: str = "continue") -> list[ast.stmt]:
     statements: list[ast.stmt] = []
     temp_names = [f"__loom_next_{index}" for index in range(len(param_names))]
     for temp_name, value in zip(temp_names, call.args, strict=True):
@@ -525,27 +684,16 @@ def _direct_rebind_statements(call: ast.Call, param_names: list[str]) -> list[as
                 value=ast.Name(id=temp_name, ctx=ast.Load()),
             )
         )
-    statements.append(ast.Continue())
+    statements.extend(_tail_transfer_statements(tail_flow))
     return statements
 
 
-def _bind_rebind_statements(call: ast.Call, param_names: list[str]) -> list[ast.stmt]:
+def _bind_rebind_statements(call: ast.Call, param_names: list[str], *, tail_flow: str = "continue") -> list[ast.stmt]:
     assign_args = ast.Assign(
         targets=[ast.Name(id="__loom_args", ctx=ast.Store())],
         value=ast.Tuple(elts=list(call.args), ctx=ast.Load()),
     )
-    assign_kwargs = ast.Assign(
-        targets=[ast.Name(id="__loom_kwargs", ctx=ast.Store())],
-        value=ast.Dict(
-            keys=[ast.Constant(value=kw.arg) for kw in call.keywords if kw.arg is not None],
-            values=[kw.value for kw in call.keywords if kw.arg is not None],
-        ),
-    )
-    if any(kw.arg is None for kw in call.keywords):
-        raise TailCallError(
-            "tail recursive calls with **kwargs expansion are not supported in MVP; "
-            "fix: pass keyword arguments explicitly in the tail call"
-        )
+    assignments: list[ast.stmt] = [assign_args, *_kwargs_assign_statements(call.keywords)]
     bind = ast.Assign(
         targets=[ast.Name(id="__loom_bound", ctx=ast.Store())],
         value=ast.Call(
@@ -557,7 +705,7 @@ def _bind_rebind_statements(call: ast.Call, param_names: list[str]) -> list[ast.
             keywords=[],
         ),
     )
-    assignments: list[ast.stmt] = [assign_args, assign_kwargs, bind]
+    assignments.append(bind)
     for name in param_names:
         assignments.append(
             ast.Assign(
@@ -569,8 +717,108 @@ def _bind_rebind_statements(call: ast.Call, param_names: list[str]) -> list[ast.
                 ),
             )
         )
-    assignments.append(ast.Continue())
+    assignments.extend(_tail_transfer_statements(tail_flow))
     return assignments
+
+
+def _tail_transfer_statements(tail_flow: str) -> list[ast.stmt]:
+    if tail_flow == "break_flag":
+        return [
+            ast.Assign(
+                targets=[ast.Name(id="__loom_tail", ctx=ast.Store())],
+                value=ast.Constant(value=True),
+            ),
+            ast.Break(),
+        ]
+    return [ast.Continue()]
+
+
+def _loop_tail_epilogue(node: ast.For | ast.AsyncFor | ast.While) -> list[ast.stmt]:
+    return [
+        ast.Assign(
+            targets=[ast.Name(id="__loom_tail", ctx=ast.Store())],
+            value=ast.Constant(value=False),
+        ),
+        node,
+        ast.If(
+            test=ast.Name(id="__loom_tail", ctx=ast.Load()),
+            body=[
+                ast.Assign(
+                    targets=[ast.Name(id="__loom_tail", ctx=ast.Store())],
+                    value=ast.Constant(value=False),
+                ),
+                ast.Continue(),
+            ],
+            orelse=[],
+        ),
+    ]
+
+
+def _kwargs_assign_statements(keywords: list[ast.keyword]) -> list[ast.stmt]:
+    explicit = [(keyword.arg, keyword.value) for keyword in keywords if keyword.arg is not None]
+    spreads = [keyword.value for keyword in keywords if keyword.arg is None]
+
+    if not spreads:
+        return [
+            ast.Assign(
+                targets=[ast.Name(id="__loom_kwargs", ctx=ast.Store())],
+                value=ast.Dict(
+                    keys=[ast.Constant(value=name) for name, _ in explicit],
+                    values=[value for _, value in explicit],
+                ),
+            )
+        ]
+
+    statements: list[ast.stmt] = [
+        ast.Assign(
+            targets=[ast.Name(id="__loom_kwargs", ctx=ast.Store())],
+            value=ast.Dict(keys=[], values=[]),
+        )
+    ]
+    for spread in spreads:
+        statements.append(
+            ast.Assign(
+                targets=[ast.Name(id="__loom_kwargs", ctx=ast.Store())],
+                value=ast.Dict(
+                    keys=[None, None],
+                    values=[
+                        ast.Name(id="__loom_kwargs", ctx=ast.Load()),
+                        spread,
+                    ],
+                ),
+            )
+        )
+    if explicit:
+        statements.append(
+            ast.Expr(
+                value=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id="__loom_kwargs", ctx=ast.Load()),
+                        attr="update",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Dict(
+                            keys=[ast.Constant(value=name) for name, _ in explicit],
+                            values=[value for _, value in explicit],
+                        )
+                    ],
+                    keywords=[],
+                )
+            )
+        )
+    return statements
+
+
+def _visit_stmt_list(transformer: _TailRecTransformer, stmts: list[ast.stmt]) -> list[ast.stmt]:
+    return _flatten_statements([transformer.visit(stmt) for stmt in stmts])
+
+
+def _find_recursive_calls_in_stmts(stmts: list[ast.stmt], function_name: str) -> list[ast.Call]:
+    for stmt in stmts:
+        if calls := _find_recursive_calls(stmt, function_name):
+            return calls
+    return []
 
 
 def _flatten_statements(items: list[ast.stmt | list[ast.stmt]]) -> list[ast.stmt]:
@@ -633,23 +881,26 @@ _REJECTION_HINTS: dict[str, str] = {
     "recursive call in assignment is not tail position": (
         "return the recursive call directly instead of assigning it to a variable"
     ),
-    "recursive call in for loop is not tail position": (
-        "move the recursive call into a tail-position `return await fn(...)` outside the loop"
+    "recursive call in for loop iter is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` in the loop body"
     ),
-    "recursive call in async for loop is not tail position": (
-        "move the recursive call into a tail-position `return await fn(...)` outside the async for loop"
+    "recursive call in async for loop iter is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` in the async for loop body"
     ),
-    "recursive call in while loop is not tail position": (
-        "move the recursive call into a tail-position `return await fn(...)` outside the while loop"
+    "recursive call in while loop test is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` in the while loop body"
     ),
-    "recursive call in with block is not tail position": (
-        "move the recursive call outside the with block or use a hand-written while loop"
+    "recursive call in with context expression is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` inside the with body"
     ),
-    "recursive call in async with block is not tail position": (
-        "move the recursive call outside the async with block or use a hand-written while loop"
+    "recursive call in async with context expression is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` inside the async with body"
     ),
-    "recursive call in try block is not supported in MVP": (
-        "move the recursive call outside the try block or use a hand-written while loop"
+    "recursive call in try finally is not supported": (
+        "move the recursive call out of the finally block or use a hand-written while loop"
+    ),
+    "recursive call in except type expression is not tail position": (
+        "move the recursive call into a tail-position `return await fn(...)` in an except handler body"
     ),
     "recursive async generator call must be terminal async-for/yield/return": (
         "use the terminal pattern: async for event in fn(...): yield event; return"
