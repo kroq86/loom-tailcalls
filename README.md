@@ -1,6 +1,9 @@
 # Loom
 
-Stack-safe async state machines for Python.
+[![PyPI](https://img.shields.io/pypi/v/loom-tailcalls)](https://pypi.org/project/loom-tailcalls/)
+[![Loom stack](https://img.shields.io/badge/docs-loom--stack-8B7355)](https://kroq86.github.io/loom-stack/)
+
+Stack-safe async state machines for Python. **Full stack overview:** [kroq86.github.io/loom-stack](https://kroq86.github.io/loom-stack/)
 
 Loom lets you write long-running async processes as explicit state
 transitions:
@@ -29,6 +32,8 @@ pip install loom-tailcalls
 ```
 
 ## Loom stack
+
+**Overview:** [kroq86.github.io/loom-stack](https://kroq86.github.io/loom-stack/) — packages, flow, audience, quick start.
 
 Three composable packages for **long-running async agent loops**. Each does one job; compose them as needed.
 
