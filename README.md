@@ -1,3 +1,5 @@
+[![Loom Stack](https://kroq86.github.io/loom-stack/assets/loom-stack-banner.svg)](https://kroq86.github.io/loom-stack/)
+
 # Loom
 
 [![PyPI](https://img.shields.io/pypi/v/loom-tailcalls)](https://pypi.org/project/loom-tailcalls/)
