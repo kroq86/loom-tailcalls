@@ -30,13 +30,20 @@ pip install loom-tailcalls
 
 ## Loom stack
 
-Small composable pieces for long-running agent loops:
+Three composable packages for **long-running async agent loops**. Each does one job; compose them as needed.
 
-| Package | Role |
-| --- | --- |
-| **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** (this repo) | Stack-safe async transitions |
-| **[flow-xray](https://github.com/kroq86/flow-xray)** | Local HTML traces |
-| **[loom-runner](https://github.com/kroq86/loom-runner)** | SQLite checkpoint/resume and CLI inspection |
+| Package | Install | Job |
+| --- | --- | --- |
+| **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** ← **this repo** | `pip install loom-tailcalls` | Write stack-safe transition loops (`@tailrec`, `@tailstream`) |
+| **[flow-xray](https://github.com/kroq86/flow-xray)** | `pip install flow-xray` | Export local HTML traces (LLM/tool calls, branches, errors) |
+| **[loom-runner](https://github.com/kroq86/loom-runner)** | `pip install loom-runner` | Checkpoint/resume in SQLite; CLI inspect (`explain`, `history`, …) |
+
+```text
+@tailrec agent loop  →  loom-runner run/resume  →  --trace trace.html
+     (shape)                  (durability)              (flow-xray)
+```
+
+**This repo** is the bottom layer: stack-safe async transitions. Pair with [loom-runner](https://github.com/kroq86/loom-runner) for durable runs and [flow-xray](https://github.com/kroq86/flow-xray) for local HTML debug — see [`demo-loom-flow/`](demo-loom-flow/).
 
 ## What's new in 0.2
 
@@ -241,7 +248,7 @@ and a fix hint.
 
 ## Integration lab
 
-[`demo-loom-flow/`](demo-loom-flow/) runs Loom + [flow-xray](https://github.com/kroq86/flow-xray) + optional Ollama:
+[`demo-loom-flow/`](demo-loom-flow/) runs **loom-tailcalls** + [flow-xray](https://github.com/kroq86/flow-xray) + optional Ollama. For durable checkpoint/resume on the same loop shape, see [loom-runner](https://github.com/kroq86/loom-runner).
 
 ```bash
 cd demo-loom-flow && python run_all_cases.py

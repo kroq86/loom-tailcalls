@@ -39,6 +39,7 @@ dev = ["pytest>=7"]
 Homepage = "https://github.com/kroq86/loom-tailcalls"
 Repository = "https://github.com/kroq86/loom-tailcalls"
 Issues = "https://github.com/kroq86/loom-tailcalls/issues"
+"Loom stack" = "https://github.com/kroq86/loom-tailcalls#loom-stack"
 
 [tool.setuptools.packages.find]
 include = ["loom*"]
