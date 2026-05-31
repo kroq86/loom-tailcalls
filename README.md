@@ -28,6 +28,12 @@ uses constant stack.
 pip install loom-tailcalls
 ```
 
+## What's new in 0.2
+
+- **`**kwargs` in tail-call** — `return await agent_loop(state, **bindings)` without hand-written `while`
+- **Structured tail positions** — tail-call inside `try`/`except`, `with`/`async with`, and loops
+- **Integration lab** — [`demo-loom-flow/`](demo-loom-flow/) with cases 01–08 (Ollama agent, 100k stress, `explain_tailcalls` smoke)
+
 ## Why Loom
 
 Python already has `while`, but long-running async systems often want a
@@ -219,8 +225,19 @@ print(explain_tailcalls(agent_loop))
 ```
 
 Rejected shapes include non-tail returns such as `return 1 + await fn(...)`,
-recursive calls inside `try`/`with` blocks, and `**kwargs` expansion in tail
-calls. Error messages include line/column and a fix hint.
+recursive calls in `try` finally / `with` context expressions / loop tests,
+and recursive calls that are not returned. Error messages include line/column
+and a fix hint.
+
+## Integration lab
+
+[`demo-loom-flow/`](demo-loom-flow/) runs Loom + [flow-xray](https://github.com/kroq86/flow-xray) + optional Ollama:
+
+```bash
+cd demo-loom-flow && python run_all_cases.py
+```
+
+See [`demo-loom-flow/README.md`](demo-loom-flow/README.md) and [`demo-loom-flow/ROADMAP.md`](demo-loom-flow/ROADMAP.md).
 
 ## Run
 
@@ -236,11 +253,14 @@ python3 scripts/bench_tailcalls.py --n 100000 --samples 5
 ```
 
 Optional local Ollama fuzzing chooses trusted test templates and bounded
-parameters; it does not execute model-written Python:
+parameters; it does not execute model-written Python. In `demo-loom-flow`,
+case 07 runs automatically when Ollama is reachable. To run the unittest directly:
 
 ```bash
-LOOM_RUN_OLLAMA=1 python3 -m unittest tests.test_ollama_contract
+LOOM_OLLAMA_FUZZ=1 python3 -m unittest tests.test_ollama_contract
 ```
+
+Skip Ollama in the demo runner: `LOOM_SKIP_OLLAMA=1 python demo-loom-flow/run_all_cases.py`
 
 ## API
 

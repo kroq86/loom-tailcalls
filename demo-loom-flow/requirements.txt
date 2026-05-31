@@ -1,0 +1,2 @@
+loom-tailcalls>=0.2.0
+flow-xray>=0.3.0

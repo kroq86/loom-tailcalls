@@ -1,0 +1,5 @@
+.venv/
+trace.html
+output/
+__pycache__/
+*.pyc
