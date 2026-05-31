@@ -42,8 +42,7 @@ Small composable pieces for long-running agent loops:
 
 - **`**kwargs` in tail-call** — `return await agent_loop(state, **bindings)` without hand-written `while`
 - **Structured tail positions** — tail-call inside `try`/`except`, `with`/`async with`, and loops
-- **Integration lab** — [`demo-loom-flow/`](demo-loom-flow/) cases 01–15; fast gate `LOOM_FAST=1 python run_all_cases.py`
-- **Growth finding [F-003](demo-loom-flow/FINDINGS.md)** — plain async + `async with session.step()` without `@tailrec` deadlocks; repro: `demo-loom-flow/scripts/diag_baseline_deadlock.py`
+- **Integration lab** — [`demo-loom-flow/`](demo-loom-flow/) with cases 01–08 (Ollama agent, 100k stress, `explain_tailcalls` smoke)
 
 ## Why Loom
 
@@ -245,13 +244,8 @@ and a fix hint.
 [`demo-loom-flow/`](demo-loom-flow/) runs Loom + [flow-xray](https://github.com/kroq86/flow-xray) + optional Ollama:
 
 ```bash
-cd demo-loom-flow
-LOOM_FAST=1 python run_all_cases.py          # ~6s, no Ollama
-python scripts/diag_baseline_deadlock.py   # F-003: why @tailrec is required with session lock
-python run_all_cases.py                    # full gate when Ollama is up
+cd demo-loom-flow && python run_all_cases.py
 ```
-
-Primary growth finding: **plain async tail recursion inside `async with session.step()` deadlocks** without `@tailrec` — see [FINDINGS F-003](demo-loom-flow/FINDINGS.md) and [`tests/test_v02_agent_baseline_equiv.py`](tests/test_v02_agent_baseline_equiv.py).
 
 See [`demo-loom-flow/README.md`](demo-loom-flow/README.md) and [`demo-loom-flow/ROADMAP.md`](demo-loom-flow/ROADMAP.md).
 
@@ -276,7 +270,7 @@ case 07 runs automatically when Ollama is reachable. To run the unittest directl
 LOOM_OLLAMA_FUZZ=1 python3 -m unittest tests.test_ollama_contract
 ```
 
-Skip Ollama in the demo runner: `LOOM_FAST=1 python demo-loom-flow/run_all_cases.py`
+Skip Ollama in the demo runner: `LOOM_SKIP_OLLAMA=1 python demo-loom-flow/run_all_cases.py`
 
 ## API
 
